@@ -85,13 +85,14 @@ MAIN_YML_STEP_ORDER = (
 FRAMEWORK_BUGGY_MARKER = '$fw/${fw##*/}'
 FRAMEWORK_FIXED_MARKERS = ('basename "$fw" .framework', "${fw%.framework}")
 
-EXPECTED_GIT_ENTRIES = {
-    " M ios/Runner.xcodeproj/project.pbxproj",
-    " M ios/Runner/Info.plist",
-    " M ios/Runner/VpnManager.swift",
-    "?? .github/workflows/",
-    "?? .github/workflows/main.yml",
-    "?? tool/verify_trollstore_setup.py",
+# Working-tree changes are allowed only for these deliverable paths (any
+# status form: M / ?? / A). Anything else is out-of-scope and fails.
+ALLOWED_WORKTREE_PATHS = {
+    "ios/Runner.xcodeproj/project.pbxproj",
+    "ios/Runner/Info.plist",
+    "ios/Runner/VpnManager.swift",
+    ".github/workflows/main.yml",
+    "tool/verify_trollstore_setup.py",
 }
 
 # The five deliverables must be committed in HEAD (post-commit state).
@@ -388,13 +389,20 @@ class TrollstoreSetupVerifier:
             return out
 
         entries = {line.rstrip("\n") for line in proc.stdout.splitlines() if line.strip()}
-        unexpected = sorted(entries - EXPECTED_GIT_ENTRIES)
+
+        def path_of(entry: str) -> str:
+            rest = entry[3:] if len(entry) > 3 else entry
+            if " -> " in rest:
+                rest = rest.split(" -> ", 1)[1]
+            return rest.strip().strip('"')
+
+        unexpected = sorted(e for e in entries if path_of(e) not in ALLOWED_WORKTREE_PATHS)
         out.append(
             CheckResult(
                 not unexpected,
                 "no out-of-scope working-tree changes",
                 f"unexpected: {unexpected}" if unexpected else
-                ("clean tree" if not entries else "only expected files"),
+                ("clean tree" if not entries else "only allowed deliverables"),
             )
         )
         try:
