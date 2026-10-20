@@ -38,7 +38,7 @@ import 'h2/frame.dart';
 import 'h2/setting.dart';
 
 class HttpClients {
-  static Future<Channel> startConnect(HostAndPort hostAndPort, {Duration timeout = const Duration(seconds: 3)}) {
+  static Future<Channel> startConnect(HostAndPort hostAndPort, {Duration timeout = const Duration(seconds: 3)}) async {
     String host = hostAndPort.host;
     //说明支持ipv6
     if (host.startsWith("[") && host.endsWith(']')) {

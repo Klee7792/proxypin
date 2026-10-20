@@ -337,9 +337,14 @@ class Client extends Network {
   Future<Channel> secureConnect(HostAndPort hostAndPort, ChannelContext channelContext) async {
     String host = _stripIPv6Brackets(hostAndPort.host);
     // Local IP-layer capture: tunnel the upstream TLS through the loopback relay.
+    // IpLayerRelay.connect returns the plain tunneled socket; TLS is then layered
+    // on top of it (SecureSocket.secure exists in this SDK; secureClient does not).
     if (IpLayerRelay.enabled) {
-      final socket = await IpLayerRelay.secureConnect(host, hostAndPort.port,
-          context: await ClientCertManager.securityContextForHost(hostAndPort.host));
+      final tunnel = await IpLayerRelay.connect(host, hostAndPort.port);
+      final socket = await SecureSocket.secure(tunnel,
+          host: host,
+          context: await ClientCertManager.securityContextForHost(hostAndPort.host),
+          onBadCertificate: (certificate) => true);
       var channel = Channel(socket);
       channelContext.serverChannel = channel;
       return listen(channel, channelContext);

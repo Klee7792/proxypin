@@ -42,19 +42,6 @@ class IpLayerRelay {
     return socket;
   }
 
-  /// TLS tunnel through the relay. Returns a [SecureSocket] connected (via the
-  /// relay) to [targetHost]:[targetPort] with SNI = [targetHost].
-  static Future<SecureSocket> secureConnect(String targetHost, int targetPort,
-      {SecurityContext? context,
-      Duration timeout = const Duration(seconds: 3),
-      bool onBadCertificate(X509Certificate certificate)?}) async {
-    final raw = await RawSocket.connect(host!, port!, timeout: timeout);
-    raw.write(utf8.encode(_connectRequest(targetHost, targetPort)));
-    await _readConnectResponseRaw(raw);
-    return SecureSocket.secureClient(raw,
-        host: targetHost, context: context, onBadCertificate: onBadCertificate ?? (_) => true);
-  }
-
   static Future<void> _readConnectResponse(Socket socket) async {
     final buffer = <int>[];
     final completer = Completer<void>();
@@ -76,24 +63,6 @@ class IpLayerRelay {
       }, onFail: fail);
     }, onError: fail, onDone: () => fail('Relay closed before CONNECT response'));
     await completer.future;
-  }
-
-  static Future<void> _readConnectResponseRaw(RawSocket raw) async {
-    final buffer = <int>[];
-    await for (final event in raw) {
-      if (event == RawSocketEvent.read || event == RawSocketEvent.readClosed) {
-        final data = raw.read();
-        if (data != null && data.isNotEmpty) {
-          buffer.addAll(data);
-          var failed = false;
-          _checkResponse(buffer, onOk: () => null, onFail: (e, [st]) {
-            failed = true;
-            throw Exception(e);
-          });
-          if (failed) return;
-        }
-      }
-    }
   }
 
   static void _checkResponse(List<int> buffer, {void Function()? onOk, void Function(Object, [StackTrace?])? onFail}) {
