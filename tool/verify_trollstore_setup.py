@@ -61,6 +61,7 @@ ACCEPTABLE_RUNNERS = {"macos-latest", "macos-14", "macos-15", "macos-15-xlarge"}
 MAIN_YML_KEY_STRINGS = (
     "flutter build ios --release --no-codesign",
     "Patch device_info_plus for current iOS SDK",
+    "Select newest Xcode (iOS 26 SDK)",
     "PlugIns/ProxyPin.appex",
     "ldid -Sios/Runner/Runner.entitlements",
     "ldid -Sios/ProxyPin/ProxyPin.entitlements",

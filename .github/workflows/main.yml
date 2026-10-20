@@ -38,6 +38,22 @@ jobs:
           channel: stable
           cache: true
 
+      - name: Select newest Xcode (iOS 26 SDK)
+        run: |
+          # Runner default is Xcode 16.4 (iOS 18 SDK), too old for APIs the app
+          # and plugins need: UIWindowScene.WindowingControlStyle (SceneDelegate)
+          # and NSProcessInfo.isiOSAppOnVision (device_info_plus). Both landed in
+          # the iOS 26 SDK. Pick the newest installed Xcode (26.x).
+          XCODE=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -v '/Xcode\.app$' | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then
+            echo "::error::no Xcode*.app found on runner"
+            exit 1
+          fi
+          echo "selecting $XCODE"
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcodebuild -showsdks | grep -i iphoneos || true
+
       - name: Flutter pub get
         run: flutter pub get
 
