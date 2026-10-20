@@ -1,7 +1,6 @@
 import 'dart:io';
 
 import 'package:flutter/services.dart';
-import 'package:proxypin/native/floating_window.dart';
 import 'package:proxypin/native/vpn.dart';
 import 'package:proxypin/network/util/logger.dart';
 import 'package:proxypin/ui/launch/launch.dart';
@@ -46,12 +45,8 @@ class PictureInPicture {
 
   ///发送数据
   static Future<bool> addData(String text) async {
-    if (Platform.isIOS) {
-      if (inPip) {
-        _channel.invokeMethod('addData', text.fixAutoLines());
-      }
-      // 跨应用悬浮窗（巨魔/越狱）：实时追加请求，无浮层时原生端会忽略
-      GlobalFloatingWindow.addData(text.fixAutoLines());
+    if (Platform.isIOS && inPip) {
+      _channel.invokeMethod('addData', text.fixAutoLines());
     }
     return false;
   }

@@ -17,7 +17,6 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:proxypin/l10n/app_localizations.dart';
-import 'package:proxypin/native/floating_window.dart';
 import 'package:proxypin/native/pip.dart';
 import 'package:proxypin/network/bin/server.dart';
 import 'package:proxypin/network/http/http.dart';
@@ -142,16 +141,6 @@ class _PictureInPictureState extends State<PictureInPictureIcon> {
           child: IconButton(
               tooltip: localizations.windowMode,
               onPressed: () async {
-                if (Platform.isIOS) {
-                  // 巨魔/越狱：优先用跨应用悬浮窗；若创建失败则退回系统 PiP
-                  final bool shown = await GlobalFloatingWindow.toggle();
-                  if (!shown) {
-                    PictureInPicture.enterPictureInPictureMode("127.0.0.1", widget.proxyServer.port);
-                  }
-                  return;
-                }
-
-                // Android 维持原生 PiP
                 var configuration = widget.proxyServer.configuration;
                 List<String>? appList = configuration.appWhitelistEnabled ? configuration.appWhitelist : [];
                 List<String>? disallowApps;
@@ -160,7 +149,7 @@ class _PictureInPictureState extends State<PictureInPictureIcon> {
                 }
 
                 PictureInPicture.enterPictureInPictureMode(
-                    await localIp(), widget.proxyServer.port,
+                    Platform.isAndroid ? await localIp() : "127.0.0.1", widget.proxyServer.port,
                     appList: appList, disallowApps: disallowApps);
               },
               icon: const Icon(Icons.picture_in_picture_alt))),

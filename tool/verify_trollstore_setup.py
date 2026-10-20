@@ -301,21 +301,6 @@ class TrollstoreSetupVerifier:
                 )
             except Exception as exc:
                 out.append(CheckResult(False, f"{label} parse", f"exception: {exc}"))
-
-        # 跨应用悬浮窗需要 springboard.overlay 授权（仅 Runner，appex 不需要）
-        try:
-            with RUNNER_ENTITLEMENTS.open("rb") as handle:
-                rdata = plistlib.load(handle)
-            has_overlay = bool(rdata.get("com.apple.private.springboard.overlay"))
-            out.append(
-                CheckResult(
-                    has_overlay,
-                    "Runner.entitlements contains com.apple.private.springboard.overlay",
-                    f"keys={list(rdata.keys())}",
-                )
-            )
-        except Exception as exc:
-            out.append(CheckResult(False, "Runner.entitlements overlay check", f"exception: {exc}"))
         return out
 
     def check_workflow(self) -> list[CheckResult]:

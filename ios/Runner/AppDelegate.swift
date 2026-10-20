@@ -30,7 +30,6 @@ import NetworkExtension
 
         if #available(iOS 13.0.0, *) {
             PictureInPictureManager.regirst(flutter: controller as! FlutterBinaryMessenger)
-            GlobalFloatingWindowManager.register(flutter: controller as! FlutterBinaryMessenger)
             MethodHandler.register(with: self.registrar(forPlugin: MethodHandler.name)!)
         }
 

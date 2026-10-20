@@ -20,10 +20,5 @@
 	<true/>
 	<key>com.apple.security.network.server</key>
 	<true/>
-	<!-- 跨应用悬浮窗（巨魔/越狱）：允许 App 窗口覆盖 SpringBoard 与其它 App -->
-	<key>com.apple.private.springboard.overlay</key>
-	<true/>
-	<key>com.apple.springboard.overlay</key>
-	<true/>
 </dict>
 </plist>
