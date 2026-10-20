@@ -52,3 +52,4 @@ l10n_errors.txt
 pubspec.lock
 /dist/
 .claude/
+.workbuddy/

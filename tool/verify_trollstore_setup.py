@@ -94,6 +94,15 @@ EXPECTED_GIT_ENTRIES = {
     "?? tool/verify_trollstore_setup.py",
 }
 
+# The five deliverables must be committed in HEAD (post-commit state).
+EXPECTED_COMMITTED_PATHS = (
+    "ios/Runner.xcodeproj/project.pbxproj",
+    "ios/Runner/Info.plist",
+    "ios/Runner/VpnManager.swift",
+    ".github/workflows/main.yml",
+    "tool/verify_trollstore_setup.py",
+)
+
 BUNDLE_ID_RE = re.compile(r"PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);")
 
 
@@ -388,18 +397,32 @@ class TrollstoreSetupVerifier:
                 ("clean tree" if not entries else "only expected files"),
             )
         )
-        missing_expected = sorted(
-            EXPECTED_GIT_ENTRIES
-            - entries
-            - {"?? .github/workflows/main.yml", "?? .github/workflows/",
-               "?? tool/verify_trollstore_setup.py"}
-        ) if entries else []
-        if entries:
+        try:
+            ls_tree = subprocess.run(
+                ["git", "ls-tree", "-r", "HEAD", "--name-only"],
+                cwd=REPO_ROOT,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            ls_tree = None
+        if ls_tree is not None and ls_tree.returncode == 0:
+            committed = set(ls_tree.stdout.splitlines())
+            missing_committed = [p for p in EXPECTED_COMMITTED_PATHS if p not in committed]
             out.append(
                 CheckResult(
-                    not missing_expected,
-                    "expected modified files present in git status",
-                    f"missing: {missing_expected}" if missing_expected else "all present",
+                    not missing_committed,
+                    "deliverable files committed in HEAD",
+                    f"missing: {missing_committed}" if missing_committed else "all present",
+                )
+            )
+        else:
+            out.append(
+                CheckResult(
+                    False,
+                    "deliverable files committed in HEAD",
+                    "git ls-tree unavailable",
                 )
             )
         return out
