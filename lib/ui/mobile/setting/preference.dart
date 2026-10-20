@@ -51,6 +51,7 @@ class _PreferenceState extends State<Preference> {
   @override
   Widget build(BuildContext context) {
     AppLocalizations localizations = AppLocalizations.of(context)!;
+    final bool isCN = Localizations.localeOf(context) == const Locale.fromSubtags(languageCode: 'zh');
     final borderColor = Theme.of(context).dividerColor.withValues(alpha: 0.13);
     final dividerColor = Theme.of(context).dividerColor.withValues(alpha: 0.22);
 
@@ -95,6 +96,23 @@ class _PreferenceState extends State<Preference> {
                         configuration.flushConfig();
                       })),
               Divider(height: 0, thickness: 0.3, color: dividerColor),
+              if (Platform.isIOS) ...[
+                ListTile(
+                    title: Text(isCN ? "IP 层全局捕获" : "IP-layer global capture"),
+                    subtitle: Text(
+                        isCN
+                            ? "开启后全部 IP 层流量进入隧道（含不走系统代理的游戏等），可能增加耗电；修改后需重连 VPN 生效"
+                            : "Routes all IP-layer traffic into the tunnel (incl. games bypassing the system proxy). May increase battery usage. Reconnect VPN after changing.",
+                        style: const TextStyle(fontSize: 12)),
+                    trailing: SwitchWidget(
+                        value: appConfiguration.ipLayerCapture,
+                        scale: 0.8,
+                        onChanged: (value) {
+                          appConfiguration.ipLayerCapture = value;
+                          appConfiguration.flushConfig();
+                        })),
+                Divider(height: 0, thickness: 0.3, color: dividerColor),
+              ],
               if (Platform.isAndroid) ...[
                 ListTile(
                     title: Text(localizations.windowMode),

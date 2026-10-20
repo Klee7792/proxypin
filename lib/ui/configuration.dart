@@ -85,6 +85,9 @@ class AppConfiguration {
   /// 底部导航栏
   bool bottomNavigation = true;
 
+  /// IP 层全局捕获：开启后全部 IP 层流量进入 VPN 隧道（含不走系统代理的应用），仅移动端有效
+  bool ipLayerCapture = false;
+
   /// 内存清理
   int? memoryCleanupThreshold;
 
@@ -223,6 +226,7 @@ class AppConfiguration {
       pipIcon.value = config['pipIcon'] ?? false;
       headerViewMode = config['headerViewMode'] ?? "table";
       bottomNavigation = config['bottomNavigation'] ?? true;
+      ipLayerCapture = config['ipLayerCapture'] ?? false;
       memoryCleanupThreshold = config['memoryCleanupThreshold'];
       autoReadEnabled = config['autoReadEnabled'] ?? true;
       clearConfirm = config['clearConfirm'] ?? false;
@@ -281,6 +285,7 @@ class AppConfiguration {
       if (Platforms.isMobile()) 'pipEnabled': pipEnabled.value,
       if (Platforms.isMobile()) 'pipIcon': pipIcon.value ? true : null,
       if (Platforms.isMobile()) 'bottomNavigation': bottomNavigation,
+      if (Platforms.isMobile()) 'ipLayerCapture': ipLayerCapture,
       if (Platforms.isDesktop())
         "windowSize": windowSize == null ? null : {"width": windowSize?.width, "height": windowSize?.height},
       if (Platforms.isDesktop())
