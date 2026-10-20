@@ -33,6 +33,7 @@ import 'package:proxypin/network/util/crts.dart';
 import 'package:proxypin/network/util/logger.dart';
 import 'package:proxypin/network/util/process_info.dart';
 import 'package:proxypin/network/util/tls.dart';
+import 'package:proxypin/network/channel/ip_layer_relay.dart';
 
 import '../bin/listener.dart';
 import 'host_port.dart';
@@ -312,6 +313,15 @@ class Client extends Network {
       {Duration timeout = const Duration(seconds: 3)}) async {
     String host = _stripIPv6Brackets(hostAndPort.host);
 
+    // Local IP-layer capture: route upstream through the loopback relay inside
+    // the NE extension to break the full-tunnel capture loop.
+    if (IpLayerRelay.enabled) {
+      final socket = await IpLayerRelay.connect(host, hostAndPort.port, timeout: timeout);
+      var channel = Channel(socket);
+      channelContext.serverChannel = channel;
+      return listen(channel, channelContext);
+    }
+
     // logger.d('Connecting to $host:${hostAndPort.port}');
     return Socket.connect(host, hostAndPort.port, timeout: timeout).then((socket) {
       if (socket.address.type != InternetAddressType.unix) {
@@ -325,8 +335,17 @@ class Client extends Network {
 
   /// ssl连接
   Future<Channel> secureConnect(HostAndPort hostAndPort, ChannelContext channelContext) async {
+    String host = _stripIPv6Brackets(hostAndPort.host);
+    // Local IP-layer capture: tunnel the upstream TLS through the loopback relay.
+    if (IpLayerRelay.enabled) {
+      final socket = await IpLayerRelay.secureConnect(host, hostAndPort.port,
+          context: await ClientCertManager.securityContextForHost(hostAndPort.host));
+      var channel = Channel(socket);
+      channelContext.serverChannel = channel;
+      return listen(channel, channelContext);
+    }
     SecurityContext? context = await ClientCertManager.securityContextForHost(hostAndPort.host);
-    return SecureSocket.connect(_stripIPv6Brackets(hostAndPort.host), hostAndPort.port,
+    return SecureSocket.connect(host, hostAndPort.port,
         context: context, timeout: const Duration(seconds: 3), onBadCertificate: (certificate) => true).then((socket) {
       var channel = Channel(socket);
       channelContext.serverChannel = channel;

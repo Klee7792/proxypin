@@ -21,6 +21,7 @@ import 'dart:typed_data';
 
 import 'package:proxypin/network/channel/channel_context.dart';
 import 'package:proxypin/network/channel/host_port.dart';
+import 'package:proxypin/network/channel/ip_layer_relay.dart';
 import 'package:proxypin/network/http/h2/h2_codec.dart';
 import 'package:proxypin/network/http/http.dart';
 import 'package:proxypin/network/http/http_headers.dart';
@@ -42,6 +43,15 @@ class HttpClients {
     //说明支持ipv6
     if (host.startsWith("[") && host.endsWith(']')) {
       host = host.substring(1, host.length - 1);
+    }
+
+    // Local IP-layer capture: route upstream through the loopback relay.
+    if (IpLayerRelay.enabled) {
+      final socket = await IpLayerRelay.connect(host, hostAndPort.port, timeout: timeout);
+      if (socket.address.type != InternetAddressType.unix) {
+        socket.setOption(SocketOption.tcpNoDelay, true);
+      }
+      return Channel(socket);
     }
 
     return Socket.connect(host, hostAndPort.port, timeout: timeout).then((socket) {
