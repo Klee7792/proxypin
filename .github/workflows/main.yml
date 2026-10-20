@@ -1,0 +1,123 @@
+name: Build iOS TrollStore (.tipa)
+
+"on":
+  workflow_dispatch:
+    inputs:
+      attach_release:
+        description: "Attach .tipa to rolling release trollstore-latest"
+        type: boolean
+        default: true
+  push:
+    branches: [main, "feat/**", "trollstore/**"]
+    paths:
+      - "ios/**"
+      - "lib/**"
+      - "pubspec.yaml"
+      - "pubspec.lock"
+      - ".github/workflows/main.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-latest
+    env:
+      HOMEBREW_NO_AUTO_UPDATE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        run: flutter pub get
+
+      - name: Build iOS (unsigned)
+        run: flutter build ios --release --no-codesign
+
+      - name: Verify NE extension embedded
+        run: |
+          APP="build/ios/iphoneos/Runner.app"
+          APPEX="$APP/PlugIns/ProxyPin.appex"
+          if [ ! -d "$APPEX" ]; then
+            echo "::error::ProxyPin.appex missing in Runner.app/PlugIns"
+            exit 1
+          fi
+          ls -R "$APP/PlugIns"
+
+      - name: Install ldid
+        run: |
+          if ! command -v ldid >/dev/null 2>&1; then
+            brew install ldid || {
+              echo "brew install ldid failed, fallback to source build"
+              git clone --depth 1 https://github.com/ProcursusTeam/ldid /tmp/ldid-src
+              make -C /tmp/ldid-src
+              cp /tmp/ldid-src/ldid /usr/local/bin/ldid
+            }
+          fi
+          ldid -v || true
+
+      - name: Sign binaries with ldid
+        run: |
+          set -euo pipefail
+          APP="build/ios/iphoneos/Runner.app"
+          APPEX="$APP/PlugIns/ProxyPin.appex"
+          ldid -Sios/Runner/Runner.entitlements "$APP/Runner"
+          ldid -e "$APP/Runner" | tee /tmp/runner-ent.xml
+          grep -q "packet-tunnel-provider" /tmp/runner-ent.xml || { echo "::error::Runner entitlements missing packet-tunnel-provider"; exit 1; }
+          APPEX_BIN=""
+          find "$APPEX" -type f > /tmp/appex-files.txt
+          while read -r f; do
+            if file "$f" | grep -q "Mach-O"; then
+              ldid -Sios/ProxyPin/ProxyPin.entitlements "$f"
+              APPEX_BIN="$f"
+            fi
+          done < /tmp/appex-files.txt
+          [ -n "$APPEX_BIN" ] || { echo "::error::no Mach-O binary found inside appex"; exit 1; }
+          ldid -e "$APPEX_BIN" | tee /tmp/appex-ent.xml
+          grep -q "packet-tunnel-provider" /tmp/appex-ent.xml || { echo "::error::appex entitlements missing packet-tunnel-provider"; exit 1; }
+          find "$APP" -type d -name "*.framework" > /tmp/frameworks.txt
+          while read -r fw; do
+            bin="$fw/$(basename "$fw" .framework)"
+            if [ -f "$bin" ]; then
+              ldid -S "$bin"
+            fi
+          done < /tmp/frameworks.txt
+          find "$APP" -name "*.dylib" -type f > /tmp/dylibs.txt
+          while read -r f; do
+            ldid -S "$f"
+          done < /tmp/dylibs.txt
+          echo "=== Runner entitlements after signing ==="
+          cat /tmp/runner-ent.xml
+          echo "=== appex entitlements after signing ==="
+          cat /tmp/appex-ent.xml
+
+      - name: Package .tipa
+        run: |
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry ProxyPin-Troll.tipa Payload
+          ls -lh ProxyPin-Troll.tipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ProxyPin-Troll-tipa
+          path: ProxyPin-Troll.tipa
+          if-no-files-found: error
+
+      - name: Attach to rolling release
+        if: github.event_name == 'workflow_dispatch' && inputs.attach_release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: trollstore-latest
+          name: "ProxyPin TrollStore (rolling probe)"
+          prerelease: true
+          make_latest: false
+          files: ProxyPin-Troll.tipa

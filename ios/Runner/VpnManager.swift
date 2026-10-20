@@ -85,8 +85,9 @@ extension VpnManager{
         let manager = NETunnelProviderManager()
         let conf = NETunnelProviderProtocol()
         conf.serverAddress = "ProxyPin"
+        conf.providerBundleIdentifier = "com.proxy.pin.troll.ProxyPin"
         manager.protocolConfiguration = conf
-        manager.localizedDescription = "ProxyPin"
+        manager.localizedDescription = "ProxyPin Troll"
         return manager
     }
 
