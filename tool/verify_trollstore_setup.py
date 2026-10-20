@@ -54,6 +54,10 @@ EXPECTED_CONFIG_COUNT = 3  # Debug / Release / Profile per target
 NE_ENTITLEMENTS_KEY = "com.apple.developer.networking.networkextension"
 NE_VALUE = "packet-tunnel-provider"
 
+# Acceptable hosted macOS runner labels. macos-latest (standard arm64) is
+# capacity-starved; macos-15-xlarge (free for public repos) is the fallback.
+ACCEPTABLE_RUNNERS = {"macos-latest", "macos-14", "macos-15", "macos-15-xlarge"}
+
 MAIN_YML_KEY_STRINGS = (
     "flutter build ios --release --no-codesign",
     "PlugIns/ProxyPin.appex",
@@ -301,8 +305,8 @@ class TrollstoreSetupVerifier:
                 job = (doc.get("jobs") or {}).get("build", {})
                 out.append(
                     CheckResult(
-                        job.get("runs-on") == "macos-latest",
-                        "job runs-on macos-latest",
+                        job.get("runs-on") in ACCEPTABLE_RUNNERS,
+                        "job runs-on an available macOS runner",
                         f"runs-on={job.get('runs-on')}",
                     )
                 )

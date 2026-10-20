@@ -21,7 +21,10 @@ permissions:
 
 jobs:
   build:
-    runs-on: macos-latest
+    # macos-latest (standard arm64) is currently starved by GitHub capacity
+    # constraints ("job was not acquired by Runner of type hosted").
+    # Larger runners are free for public repos and use a much less contended pool.
+    runs-on: macos-15-xlarge
     env:
       HOMEBREW_NO_AUTO_UPDATE: 1
     steps:
