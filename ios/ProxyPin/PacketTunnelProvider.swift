@@ -302,7 +302,7 @@ final class VpnRelay {
                             self.pump(from: from, to: to)
                         }))
             } else if isComplete || error != nil {
-                to.send(content: nil, contentContext: .defaultMessage, isComplete: true, completion: .no)
+                to.send(content: nil, contentContext: .defaultMessage, isComplete: true, completion: .idempotent)
                 from.cancel()
                 to.cancel()
             } else {
