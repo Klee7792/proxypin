@@ -96,19 +96,26 @@ class PacketTunnelProvider: NEPacketTunnelProvider {
 
         }
 
-        //http代理
-        let proxySettings = NEProxySettings()
-        proxySettings.httpEnabled = true
-        proxySettings.httpServer = NEProxyServer(address: host, port: proxyPort)
-        proxySettings.httpsEnabled = true
-        proxySettings.httpsServer = NEProxyServer(address: host, port: proxyPort)
-        // If a proxyPassDomains list was provided, use it as the exceptionList so these domains bypass the proxy.
-        if let pass = proxyPassDomains {
-            proxySettings.exceptionList = pass
-        }
+        // In IP-layer capture (ipProxy) mode we must NOT set a system HTTP proxy.
+        // The packet tunnel already captures all traffic and the Swift ProxyVpnService
+        // forwards it to the local proxy directly. If we also set NEProxySettings here,
+        // the relay's own upstream connections (which run inside the provider process)
+        // would be routed back through the system proxy to 127.0.0.1:proxyPort — looping
+        // TLS back into the Dart proxy and producing "SSL handshake failed" (-2).
+        if !ipProxy {
+            let proxySettings = NEProxySettings()
+            proxySettings.httpEnabled = true
+            proxySettings.httpServer = NEProxyServer(address: host, port: proxyPort)
+            proxySettings.httpsEnabled = true
+            proxySettings.httpsServer = NEProxyServer(address: host, port: proxyPort)
+            // If a proxyPassDomains list was provided, use it as the exceptionList so these domains bypass the proxy.
+            if let pass = proxyPassDomains {
+                proxySettings.exceptionList = pass
+            }
 
-        proxySettings.matchDomains = [""]
-        networkSettings.proxySettings =  proxySettings
+            proxySettings.matchDomains = [""]
+            networkSettings.proxySettings =  proxySettings
+        }
 
         networkSettings.ipv4Settings = ipv4Settings
 
@@ -265,7 +272,12 @@ final class VpnRelay {
         let host = String(comps[0])
         NSLog("[VpnRelay] CONNECT \(host):\(port)")
 
-        let upstream = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: .tcp)
+        let upstreamParams = NWParameters.tcp
+        // The relay must reach the real server directly. Never route its upstream
+        // through the system proxy (or any proxy) — doing so loops TLS back into
+        // the local Dart proxy and yields "SSL handshake failed" (-2).
+        upstreamParams.preferNoProxies = true
+        let upstream = NWConnection(host: NWEndpoint.Host(host), port: NWEndpoint.Port(rawValue: port)!, using: upstreamParams)
         upstream.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
