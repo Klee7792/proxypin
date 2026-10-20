@@ -69,9 +69,23 @@ workflows:
           fi
           grep -n "isiOSAppOnVision" "$PLUGIN_M" || true
 
+      - name: Install Rust toolchain (code_forge / Cargokit)
+        script: |
+          set -eu
+          # code_forge (flutter_rust_bridge fork, direct dependency) compiles a Rust static
+          # library via Cargokit during the Xcode build; Cargokit's build_tool requires
+          # rustup in PATH (it installs the iOS Rust targets itself).
+          if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+            curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain stable
+          fi
+          "$HOME/.cargo/bin/rustup" --version
+          "$HOME/.cargo/bin/cargo" --version
+
       - name: Build iOS (unsigned)
         script: |
           set -eu
+          export PATH="$HOME/.cargo/bin:$PATH"
+          cargo --version
           flutter build ios --release --no-codesign
 
       - name: Verify NE extension embedded
@@ -205,3 +219,5 @@ cache:
   paths:
     - ~/.pub-cache
     - $CM_BUILD_DIR/ios/Pods
+    - ~/.cargo/registry
+    - ~/.cargokit
