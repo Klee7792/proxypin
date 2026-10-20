@@ -28,6 +28,13 @@ workflows:
       # device_info_plus uses NSProcessInfo.isiOSAppOnVision; both need the
       # iOS 26 SDK. Xcode 26.6 is Codemagic's current default mac_mini_m2 image.
       xcode: 26.6
+      # GITHUB_TOKEN is defined in the "test" environment variable group in the
+      # Codemagic app settings. A grouped variable is NOT injected unless the
+      # workflow references its group here (ungrouped app-level vars are injected
+      # automatically). Without this the release-upload step sees an empty token
+      # and skips itself.
+      groups:
+        - test
       vars:
         HOMEBREW_NO_AUTO_UPDATE: "1"
     triggering:
