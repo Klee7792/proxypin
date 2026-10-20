@@ -1,0 +1,205 @@
+# ProxyPin TrollStore - Codemagic build (unsigned .tipa for TrollStore / jailbroken devices)
+#
+# Why Codemagic: GitHub-hosted standard macOS runners (free tier) have been
+# capacity-starved for this account - four consecutive runs died with "The job
+# was not acquired by Runner of type hosted" inside the 15-minute queue window,
+# including during US-night off-peak. Codemagic's free plan (500 macOS M2 build
+# minutes/month, no credit card) runs the exact same pipeline:
+#   unsigned Flutter iOS build -> ldid fake-sign -> .tipa package
+#
+# Optional app-level secure variable (recommended):
+#   GITHUB_TOKEN - fine-grained PAT with contents:write on this repository.
+#                  Used to attach ProxyPin-Troll.tipa to the rolling prerelease
+#                  "trollstore-latest", giving a public direct-download link for
+#                  Safari on the test device. If unset, the upload step is
+#                  skipped and the .tipa stays in Codemagic artifacts
+#                  (30-day retention on the free plan).
+#
+# Manual builds: Codemagic UI -> this app -> "Start build" (any branch).
+
+workflows:
+  trollstore-tipa:
+    name: ProxyPin TrollStore (.tipa)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: stable
+      # SceneDelegate uses UIWindowScene.WindowingControlStyle and
+      # device_info_plus uses NSProcessInfo.isiOSAppOnVision; both need the
+      # iOS 26 SDK. Xcode 26.6 is Codemagic's current default mac_mini_m2 image.
+      xcode: 26.6
+      vars:
+        HOMEBREW_NO_AUTO_UPDATE: "1"
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: "feat/trollstore-ne-probe"
+          include: true
+          source: true
+      cancel_previous_builds: true
+    cache:
+      paths:
+        - ~/.pub-cache
+        - $CM_BUILD_DIR/ios/Pods
+    scripts:
+      - name: Flutter pub get
+        script: |
+          set -eu
+          flutter pub get
+
+      - name: Patch device_info_plus for current iOS SDK
+        script: |
+          set -eu
+          # NSProcessInfo.isiOSAppOnVision is not declared by older iOS SDKs
+          # (e.g. Xcode 16.4 / iOS 18), so device_info_plus (<= 13.3.0, still
+          # unfixed upstream) fails with:
+          #   "No visible @interface for 'NSProcessInfo' declares the selector
+          #    'isiOSAppOnVision'"
+          # The flag only distinguishes visionOS; force NO (correct on iPhone).
+          # On iOS 26 SDK images this is a no-op (the guarded call compiles).
+          CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
+          PLUGIN_M=$(find "$CACHE/hosted/pub.dev" -name FPPDeviceInfoPlusPlugin.m -path '*device_info_plus*' | head -1)
+          if [ -z "$PLUGIN_M" ]; then
+            echo "device_info_plus iOS plugin source not found under $CACHE"
+            exit 1
+          fi
+          echo "plugin source: $PLUGIN_M"
+          if grep -q "\[info isiOSAppOnVision\]" "$PLUGIN_M"; then
+            sed -i '' 's/\[info isiOSAppOnVision\]/NO/' "$PLUGIN_M"
+            echo "patched [info isiOSAppOnVision] -> NO"
+          else
+            echo "unguarded isiOSAppOnVision call not found; assuming upstream fix, no patch needed"
+          fi
+          grep -n "isiOSAppOnVision" "$PLUGIN_M" || true
+
+      - name: Build iOS (unsigned)
+        script: |
+          set -eu
+          flutter build ios --release --no-codesign
+
+      - name: Verify NE extension embedded
+        script: |
+          set -eu
+          APP="build/ios/iphoneos/Runner.app"
+          APPEX="$APP/PlugIns/ProxyPin.appex"
+          if [ ! -d "$APPEX" ]; then
+            echo "ProxyPin.appex missing in Runner.app/PlugIns"
+            exit 1
+          fi
+          ls -R "$APP/PlugIns"
+
+      - name: Install ldid
+        script: |
+          set -eu
+          # homebrew-core ships ldid (saurik v2.1.5, arm64 bottle, the same
+          # tool Cydia Impactor used to fake-sign IPAs) pulling libplist +
+          # openssl@3 automatically. If brew is unavailable, build the
+          # ProcursusTeam fork from source (needs libplist + openssl pkg-config).
+          mkdir -p "$CM_BUILD_DIR/tools"
+          if command -v ldid >/dev/null 2>&1; then
+            cp "$(command -v ldid)" "$CM_BUILD_DIR/tools/ldid"
+            echo "ldid already present on machine"
+          elif brew install ldid; then
+            cp "$(command -v ldid)" "$CM_BUILD_DIR/tools/ldid"
+            echo "ldid installed via brew"
+          else
+            echo "brew install ldid failed, fallback to source build"
+            rm -rf /tmp/ldid-src
+            git clone --depth 1 https://github.com/ProcursusTeam/ldid.git /tmp/ldid-src
+            brew install libplist openssl@3 pkg-config
+            export PKG_CONFIG_PATH="$(brew --prefix)/lib/pkgconfig:$(brew --prefix openssl@3)/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}"
+            make -C /tmp/ldid-src
+            cp /tmp/ldid-src/ldid "$CM_BUILD_DIR/tools/ldid"
+          fi
+          test -x "$CM_BUILD_DIR/tools/ldid" || { echo "ldid unavailable"; exit 1; }
+          "$CM_BUILD_DIR/tools/ldid" -v 2>&1 || true
+
+      - name: Sign binaries with ldid
+        script: |
+          set -eu
+          LDID="$CM_BUILD_DIR/tools/ldid"
+          APP="build/ios/iphoneos/Runner.app"
+          APPEX="$APP/PlugIns/ProxyPin.appex"
+          "$LDID" -Sios/Runner/Runner.entitlements "$APP/Runner"
+          "$LDID" -e "$APP/Runner" > runner-ent.xml
+          grep -q "packet-tunnel-provider" runner-ent.xml || { echo "Runner entitlements missing packet-tunnel-provider"; exit 1; }
+          APPEX_BIN=""
+          find "$APPEX" -type f > appex-files.txt
+          while read -r f; do
+            if file "$f" | grep -q "Mach-O"; then
+              "$LDID" -Sios/ProxyPin/ProxyPin.entitlements "$f"
+              APPEX_BIN="$f"
+            fi
+          done < appex-files.txt
+          [ -n "$APPEX_BIN" ] || { echo "no Mach-O binary found inside appex"; exit 1; }
+          "$LDID" -e "$APPEX_BIN" > appex-ent.xml
+          grep -q "packet-tunnel-provider" appex-ent.xml || { echo "appex entitlements missing packet-tunnel-provider"; exit 1; }
+          find "$APP" -type d -name "*.framework" > frameworks.txt
+          while read -r fw; do
+            bin="$fw/$(basename "$fw" .framework)"
+            if [ -f "$bin" ]; then
+              "$LDID" -S "$bin"
+            fi
+          done < frameworks.txt
+          find "$APP" -name "*.dylib" -type f > dylibs.txt
+          while read -r f; do
+            "$LDID" -S "$f"
+          done < dylibs.txt
+          {
+            echo "=== Runner entitlements after signing ==="
+            cat runner-ent.xml
+            echo "=== appex entitlements after signing ==="
+            cat appex-ent.xml
+            echo "=== appex Mach-O ==="
+            echo "$APPEX_BIN"
+            echo "=== frameworks signed ==="
+            cat frameworks.txt
+            echo "=== dylibs signed ==="
+            cat dylibs.txt
+          } > sign-report.txt
+          cat sign-report.txt
+
+      - name: Package .tipa
+        script: |
+          set -eu
+          rm -rf Payload
+          mkdir -p Payload
+          cp -R build/ios/iphoneos/Runner.app Payload/
+          zip -qry ProxyPin-Troll.tipa Payload
+          ls -lh ProxyPin-Troll.tipa
+
+      - name: Attach to rolling release (needs GITHUB_TOKEN)
+        script: |
+          set -eu
+          if [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "GITHUB_TOKEN not set; skipping release upload (artifact stays in Codemagic)"
+            exit 0
+          fi
+          REPO="Klee7792/proxypin"
+          TAG="trollstore-latest"
+          API="https://api.github.com/repos/$REPO"
+          AUTH="Authorization: Bearer $GITHUB_TOKEN"
+          curl -sSL -H "$AUTH" "$API/releases/tags/$TAG" -o rel.json
+          REL_ID=$(python3 -c 'import json; print(json.load(open("rel.json")).get("id",""))' 2>/dev/null || true)
+          if [ -z "$REL_ID" ]; then
+            curl -sSL -X POST -H "$AUTH" -H "Content-Type: application/json" \
+              -d "{\"tag_name\":\"$TAG\",\"name\":\"ProxyPin TrollStore (rolling probe)\",\"prerelease\":true,\"make_latest\":\"false\"}" \
+              "$API/releases" -o rel.json
+            REL_ID=$(python3 -c 'import json; print(json.load(open("rel.json")).get("id",""))')
+          fi
+          [ -n "$REL_ID" ] || { echo "failed to resolve release id"; exit 1; }
+          curl -sSL -H "$AUTH" "$API/releases/$REL_ID/assets" -o assets.json
+          ASSET_ID=$(python3 -c 'import json; d=json.load(open("assets.json")); print(next((a["id"] for a in d if a["name"]=="ProxyPin-Troll.tipa"), ""))' 2>/dev/null || true)
+          if [ -n "$ASSET_ID" ]; then
+            curl -sSL -X DELETE -H "$AUTH" "$API/releases/$REL_ID/assets/$ASSET_ID" -o /dev/null
+          fi
+          curl -sSL -X POST -H "$AUTH" -H "Content-Type: application/zip" \
+            --data-binary "@ProxyPin-Troll.tipa" \
+            "https://uploads.github.com/repos/$REPO/releases/$REL_ID/assets?name=ProxyPin-Troll.tipa" -o asset.json
+          python3 -c 'import json; print("release asset:", json.load(open("asset.json")).get("browser_download_url",""))'
+          rm -f rel.json assets.json asset.json
+
+    artifacts:
+      - ProxyPin-Troll.tipa
+      - sign-report.txt

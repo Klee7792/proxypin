@@ -42,6 +42,7 @@ INFO_PLIST = REPO_ROOT / "ios" / "Runner" / "Info.plist"
 RUNNER_ENTITLEMENTS = REPO_ROOT / "ios" / "Runner" / "Runner.entitlements"
 APPEX_ENTITLEMENTS = REPO_ROOT / "ios" / "ProxyPin" / "ProxyPin.entitlements"
 MAIN_YML = REPO_ROOT / ".github" / "workflows" / "main.yml"
+CODEMAGIC_YML = REPO_ROOT / "codemagic.yaml"
 
 # --- contract constants (per team spec) -------------------------------------
 EXPECTED_RUNNER_BUNDLE_ID = "com.proxy.pin.troll"
@@ -82,6 +83,30 @@ MAIN_YML_STEP_ORDER = (
     "Attach to rolling release",
 )
 
+# --- Codemagic pipeline (primary builder; see codemagic.yaml header) ---------
+# GitHub-hosted standard macOS runners are capacity-starved for this account,
+# so the .tipa is built on Codemagic (free plan, 500 macOS M2 min/month) with
+# the identical unsigned-build -> ldid-sign -> .tipa pipeline.
+CODEMAGIC_WORKFLOW_ID = "trollstore-tipa"
+CODEMAGIC_KEY_STRINGS = (
+    "flutter build ios --release --no-codesign",
+    "Patch device_info_plus for current iOS SDK",
+    "PlugIns/ProxyPin.appex",
+    "-Sios/Runner/Runner.entitlements",
+    "-Sios/ProxyPin/ProxyPin.entitlements",
+    "zip -qry",
+    "ProxyPin-Troll.tipa",
+    "mac_mini_m2",
+    "trollstore-latest",
+    "GITHUB_TOKEN",
+    "packet-tunnel-provider",
+)
+CODEMAGIC_SCRIPT_ORDER = (
+    "Build iOS (unsigned)",
+    "Sign binaries with ldid",
+    "Package .tipa",
+)
+
 # Buggy framework-bin derivation: "$fw/${fw##*/}" keeps the ".framework"
 # suffix, so the file never exists and frameworks are silently not signed.
 FRAMEWORK_BUGGY_MARKER = '$fw/${fw##*/}'
@@ -94,15 +119,17 @@ ALLOWED_WORKTREE_PATHS = {
     "ios/Runner/Info.plist",
     "ios/Runner/VpnManager.swift",
     ".github/workflows/main.yml",
+    "codemagic.yaml",
     "tool/verify_trollstore_setup.py",
 }
 
-# The five deliverables must be committed in HEAD (post-commit state).
+# The deliverables must be committed in HEAD (post-commit state).
 EXPECTED_COMMITTED_PATHS = (
     "ios/Runner.xcodeproj/project.pbxproj",
     "ios/Runner/Info.plist",
     "ios/Runner/VpnManager.swift",
     ".github/workflows/main.yml",
+    "codemagic.yaml",
     "tool/verify_trollstore_setup.py",
 )
 
@@ -361,6 +388,102 @@ class TrollstoreSetupVerifier:
         )
         return out
 
+    def check_codemagic(self) -> list[CheckResult]:
+        out: list[CheckResult] = []
+        if not CODEMAGIC_YML.is_file():
+            out.append(CheckResult(False, "codemagic.yaml exists", f"missing: {CODEMAGIC_YML}"))
+            return out
+        text = CODEMAGIC_YML.read_text(encoding="utf-8")
+
+        missing = [s for s in CODEMAGIC_KEY_STRINGS if s not in text]
+        out.append(
+            CheckResult(
+                not missing,
+                "codemagic.yaml key step strings present",
+                f"missing: {missing}" if missing else "all present",
+            )
+        )
+
+        if HAVE_YAML:
+            try:
+                doc = yaml.safe_load(text)
+                workflows = doc.get("workflows") or {}
+                wf = workflows.get(CODEMAGIC_WORKFLOW_ID)
+                out.append(
+                    CheckResult(
+                        wf is not None,
+                        f"workflow {CODEMAGIC_WORKFLOW_ID!r} defined",
+                        f"workflows={sorted(workflows)}",
+                    )
+                )
+                if wf is not None:
+                    env = wf.get("environment") or {}
+                    out.append(
+                        CheckResult(
+                            wf.get("instance_type") == "mac_mini_m2",
+                            "instance_type mac_mini_m2 (free plan)",
+                            f"instance_type={wf.get('instance_type')}",
+                        )
+                    )
+                    out.append(
+                        CheckResult(
+                            env.get("flutter") == "stable",
+                            "flutter stable",
+                            f"flutter={env.get('flutter')}",
+                        )
+                    )
+                    out.append(
+                        CheckResult(
+                            str(env.get("xcode", "")).startswith("26"),
+                            "xcode 26.x (iOS 26 SDK for NE/SceneDelegate APIs)",
+                            f"xcode={env.get('xcode')}",
+                        )
+                    )
+                    out.append(
+                        CheckResult(
+                            bool(wf.get("artifacts")),
+                            "artifacts declared (.tipa + sign report)",
+                            f"artifacts={wf.get('artifacts')}",
+                        )
+                    )
+                    scripts = [s.get("name", "") for s in wf.get("scripts", [])]
+                    positions = []
+                    for name in CODEMAGIC_SCRIPT_ORDER:
+                        positions.append(scripts.index(name) if name in scripts else -1)
+                    ordered = all(a != -1 for a in positions) and positions == sorted(positions)
+                    out.append(
+                        CheckResult(
+                            ordered,
+                            "signing steps ordered build -> sign -> package",
+                            f"positions={dict(zip(CODEMAGIC_SCRIPT_ORDER, positions))}",
+                        )
+                    )
+            except Exception as exc:
+                out.append(CheckResult(False, "codemagic.yaml YAML parse", f"exception: {exc}"))
+        else:
+            out.append(
+                CheckResult(
+                    True,
+                    "codemagic.yaml YAML structural validation",
+                    "SKIPPED: PyYAML not installed; degraded to key-string presence checks",
+                )
+            )
+
+        # Framework signing must derive the binary path without the .framework
+        # suffix (Foo.framework/Foo), otherwise every framework is silently
+        # missed. The buggy derivation keeps the suffix.
+        buggy = FRAMEWORK_BUGGY_MARKER in text
+        fixed = any(marker in text for marker in FRAMEWORK_FIXED_MARKERS)
+        out.append(
+            CheckResult(
+                fixed and not buggy,
+                "codemagic framework signing derives binary path without .framework suffix",
+                "fixed derivation present" if fixed and not buggy else
+                f"buggy marker present={buggy}, fixed marker present={fixed}",
+            )
+        )
+        return out
+
     def check_git_scope(self) -> list[CheckResult]:
         out: list[CheckResult] = []
         try:
@@ -492,6 +615,7 @@ class TrollstoreSetupVerifier:
         self.run_group("Info.plist display name", self.check_display_name)
         self.run_group("entitlements (Runner + appex)", self.check_entitlements)
         self.run_group("CI workflow .github/workflows/main.yml", self.check_workflow)
+        self.run_group("CI pipeline codemagic.yaml (primary builder)", self.check_codemagic)
         self.run_group("git working-tree scope", self.check_git_scope)
         self.run_group("macOS scope guard", self.check_macos_scope)
         return self.failed == 0
