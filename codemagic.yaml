@@ -38,10 +38,6 @@ workflows:
           include: true
           source: true
       cancel_previous_builds: true
-    cache:
-      paths:
-        - ~/.pub-cache
-        - $CM_BUILD_DIR/ios/Pods
     scripts:
       - name: Flutter pub get
         script: |
@@ -203,3 +199,9 @@ workflows:
     artifacts:
       - ProxyPin-Troll.tipa
       - sign-report.txt
+
+# Cache is a root-level key in the Codemagic schema (NOT per-workflow).
+cache:
+  paths:
+    - ~/.pub-cache
+    - $CM_BUILD_DIR/ios/Pods
