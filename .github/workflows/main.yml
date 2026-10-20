@@ -8,7 +8,9 @@ name: Build iOS TrollStore (.tipa)
         type: boolean
         default: true
   push:
-    branches: [main, "feat/**", "trollstore/**"]
+    # Only main: iteration pushes on feature branches do NOT auto-trigger
+    # builds (macOS runner queues are congested; dispatch manually instead).
+    branches: [main]
     paths:
       - "ios/**"
       - "lib/**"
