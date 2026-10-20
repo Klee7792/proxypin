@@ -41,6 +41,29 @@ jobs:
       - name: Flutter pub get
         run: flutter pub get
 
+      - name: Patch device_info_plus for current iOS SDK
+        run: |
+          # NSProcessInfo.isiOSAppOnVision is not declared by the iOS SDK on the
+          # macos-15 image (Xcode 26+), so device_info_plus (<= 13.3.0, still
+          # unfixed upstream) fails with:
+          #   "No visible @interface for 'NSProcessInfo' declares the selector
+          #    'isiOSAppOnVision'"
+          # The flag only distinguishes visionOS; force NO (correct on iPhone).
+          CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
+          PLUGIN_M=$(find "$CACHE/hosted/pub.dev" -name FPPDeviceInfoPlusPlugin.m -path '*device_info_plus*' | head -1)
+          if [ -z "$PLUGIN_M" ]; then
+            echo "::error::device_info_plus iOS plugin source not found under $CACHE"
+            exit 1
+          fi
+          echo "plugin source: $PLUGIN_M"
+          if grep -q "\[info isiOSAppOnVision\]" "$PLUGIN_M"; then
+            sed -i '' 's/\[info isiOSAppOnVision\]/NO/' "$PLUGIN_M"
+            echo "patched [info isiOSAppOnVision] -> NO"
+          else
+            echo "unguarded isiOSAppOnVision call not found; assuming upstream fix, no patch needed"
+          fi
+          grep -n "isiOSAppOnVision" "$PLUGIN_M" || true
+
       - name: Build iOS (unsigned)
         run: flutter build ios --release --no-codesign
 
